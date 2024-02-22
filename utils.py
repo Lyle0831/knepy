@@ -43,3 +43,9 @@ def get_effective_lambda(filt,wave_eff=False):
                 return C_CGS/(float(filt[:-3])*1e3*eV_CGS/h_CGS)*1e8
             else:
                 return float(filt[:-3])*1e3*eV_CGS/h_CGS
+
+def mag2fluxdensity(mag,band):
+    #convert ABmag to flux density(Jy)
+    bandpass = sncosmo.get_bandpass(band)
+    mab = u.Magnitude(mag*u.ABmag)
+    return mab.to(u.Jy,u.spectral_density(bandpass.wave_eff * u.AA)).value
