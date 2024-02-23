@@ -1,6 +1,7 @@
 from .Model import Kilonova
 from .Prior import Prior
 from .Transient import Transient
+from . import utils
 from typing import List
 import numpy as np
 import os
@@ -10,10 +11,6 @@ from dynesty.pool import Pool as dynesty_pool
 #import pymultinest
 
 def dynesty_fit(transient:Transient,models:List[Kilonova],priors:List[Prior] = None,dlogz = None,processes = 1):
-    '''
-    only use flux density now
-    if you want to use magnitude, change sub to mags - upl_mags
-    '''
     print('Start fitting!')
     model_num = len(models)
     params_num = [len(model.priors) for model in models]
@@ -34,71 +31,48 @@ def dynesty_fit(transient:Transient,models:List[Kilonova],priors:List[Prior] = N
             elif prior.prior_type == 'gaussian':
                 u_params[i] = scipy.stats.truncnorm.ppf(u_params[i],(prior.min-prior.mu)/prior.sigma,(prior.max-prior.mu)/prior.sigma,loc = prior.mu,scale = prior.sigma)
         return u_params
-    
+
     def dlog_like(params):
         log_band = []
         params = np.array(params)
-        variance = 0
+        variance = 1
         for band in bands:
             phase = data[(data['band']==band)]['phase']
-            mags = model.cal_lightcurve(param_list=params,times=phase,band=band,dL=dL)
-            log_i = -0.5*np.sum((data[data['band']==band]['mag']-mags)**2/(variance**2+data[data['band']==band]['mag_err']**2))
-            if np.isin(99,data[data['band']==band]['mag_err']):
-                upl_phase = data[(data['band']==band) & (data['mag_err']==99)]['phase']
-                upl_mags = data[(data['band']==band) & (data['mag_err']==99)]['mag']
-                mags = model.cal_lightcurve(param_list=params,times=upl_phase,band=band,dL=dL)
-                #sub = mags - upl_mags
-                sub = upl_mags - mags
-                if np.min(sub) < 0:
-                    log_i = -np.inf
-            log_band.append(log_i)
-        return np.sum(log_band)
 
-    def dlog_like_n(params):
-        log_band = []
-        params = np.array(params)
-        variance = 0
-        for band in bands:
-            phase = data[(data['band']==band)]['phase']
-            mags = np.zeros(len(phase))
+            mags = []
             total = 0
             for i in range(model_num):
                 model = models[i]
-                mags += model.cal_lightcurve(param_list=params[total:total+params_num[i]],times=phase,band=band,dL=dL)
+                mags.append(model.cal_lightcurve(param_list=params[total:total+params_num[i]],times=phase,band=band,dL=dL))
                 total += params_num[i]
+            mags = utils.sumab(mags)
+
             log_i = -0.5*np.sum((data[data['band']==band]['mag']-mags)**2/(variance**2+data[data['band']==band]['mag_err']**2))
             if np.isin(99,data[data['band']==band]['mag_err']):
                 upl_phase = data[(data['band']==band) & (data['mag_err']==99)]['phase']
                 upl_mags = data[(data['band']==band) & (data['mag_err']==99)]['mag']
+                mags = []
+                total = 0
                 for i in range(model_num):
                     model = models[i]
-                    mags += model.cal_lightcurve(param_list=params[total:total+params_num[i]],times=phase,band=band,dL=dL)
-                    total += params_num[i]                
-                #sub = mags - upl_mags
-                sub = upl_mags - mags
+                    mags.append(model.cal_lightcurve(param_list=params[total:total+params_num[i]],times=upl_phase,band=band,dL=dL))
+                    total += params_num[i] 
+                mags = utils.sumab(mags)               
+                sub = mags - upl_mags
                 if np.min(sub) < 0:
                     log_i = -np.inf
             log_band.append(log_i)
         return np.sum(log_band)
     
     if processes == 1:
-        if model_num == 1:
-            model = models[0]
-            dsampler = dynesty.NestedSampler(dlog_like, prior_transform, ndim=n_dim, nlive=1500)
-        else:
-            dsampler = dynesty.NestedSampler(dlog_like_n, prior_transform, ndim=n_dim, nlive=1500)
+        dsampler = dynesty.NestedSampler(dlog_like, prior_transform, ndim=n_dim, nlive=1500)
+        dsampler.run_nested(dlogz = dlogz)
     else:
-        if model_num == 1:
-            model = models[0]
-            with dynesty_pool(processes, dlog_like, prior_transform) as pool:
-                dsampler = dynesty.NestedSampler(pool.loglike, pool.prior_transform,
-                                        ndim=n_dim, nlive = 1500, pool = pool)
-        else:
-            with dynesty_pool(processes, dlog_like_n, prior_transform) as pool:
-                dsampler = dynesty.NestedSampler(pool.loglike, pool.prior_transform,
-                                        ndim=n_dim, nlive = 1500, pool = pool)
+        with dynesty_pool(processes, dlog_like, prior_transform) as pool:
+            dsampler = dynesty.NestedSampler(pool.loglike, pool.prior_transform,
+                                    ndim=n_dim, nlive = 1500, pool = pool)
+            dsampler.run_nested(dlogz = dlogz)
 
-    dsampler.run_nested(dlogz = dlogz)
     results = dsampler.results
 
     return results

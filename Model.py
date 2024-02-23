@@ -44,7 +44,10 @@ class Kilonova():
                 raise ImportError('afterglowpy is not installed')
             
     def _cal_lightcurve(self,param_list,times,band,dL):
-    
+        if band[-3:] == 'GHz' or band[-3:] == 'keV':
+            lightcurve = np.zeros(times.shape)
+            lightcurve.fill(99)
+            return lightcurve
         param_mins = self.model[band]["param_mins"]
         param_maxs = self.model[band]["param_maxs"]
         mins = self.model[band]["data_mins"]
@@ -64,6 +67,7 @@ class Kilonova():
         f = interp1d(tt_interp,mag_back,fill_value = "extrapolate")
         mag = f(times)
         lightcurve = mag - 5 + 5*np.log10(dL/utils.pc)
+
         return lightcurve
     
     def _cal_lightcurve_afterglowpy(self,param_list,times,band,dL,z):
@@ -75,7 +79,7 @@ class Kilonova():
         dL: luminosity distance(cm)
         z: redshift
 
-        output: array of flux density(Jy)
+        output: array of lightcurve
         '''
         import afterglowpy as grb
         Z = {'jetType': grb.jet.Gaussian,
@@ -95,5 +99,5 @@ class Kilonova():
         Z['thetaWing'] = 4 * Z['thetaCore']
         nu = np.empty(times.shape)
         nu.fill(utils.get_effective_lambda(band,wave_eff=False))
-        Fnu = grb.fluxDensity(times*86400,nu,**Z)
-        return Fnu*1e-3
+        Fnu = grb.fluxDensity(times*86400,nu,**Z)*1e-3 #Jy
+        return utils.fluxdensity2mag(Fnu)

@@ -44,8 +44,24 @@ def get_effective_lambda(filt,wave_eff=False):
             else:
                 return float(filt[:-3])*1e3*eV_CGS/h_CGS
 
-def mag2fluxdensity(mag,band):
-    #convert ABmag to flux density(Jy)
-    bandpass = sncosmo.get_bandpass(band)
-    mab = u.Magnitude(mag*u.ABmag)
-    return mab.to(u.Jy,u.spectral_density(bandpass.wave_eff * u.AA)).value
+def mag2fluxdensity(mag,mode = 'Jy'):
+    #convert magnitude to flux density
+    if mode == 'Jy':
+        return 10**(-mag/2.5)*3631
+    elif mode == 'cgs':
+        #both are correct
+        #return 10**(-mag/2.5)*3631*1e-23
+        return 10**(-(mag+48.6)/2.5)
+def fluxdensity2mag(flux,mode = 'Jy'):
+    #convert flux density to magnitude
+    if mode == 'Jy':
+        return -2.5*np.log10(flux/3631)
+    elif mode == 'cgs':
+        #both are correct
+        #return -2.5*np.log10(flux/3631*1e23)
+        return -2.5*np.log10(flux)-48.6
+def sumab(mab_list):
+    _flux_all = np.zeros(len(mab_list[0]))
+    for mab in mab_list:
+        _flux_all += mag2fluxdensity(mab)
+    return fluxdensity2mag(_flux_all)
