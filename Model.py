@@ -5,7 +5,13 @@ from scipy.interpolate import interp1d
 import numpy as np
 from . import utils
 from . import Prior
+
+
 class Kilonova():
+    '''
+    model_name: string of model name, 'Kasen', 'POSSIS', 'SuperNu', 'afterglowpy', 'Kasen-2comp'
+    model_type: 0 for trained model, 1 for afterglowpy, 2 for 2-component model
+    '''
     def __init__(self,model_name,model_dir = os.path.join(os.path.dirname(__file__),'models/')):
         self.model_name = model_name
         self.model_dir = model_dir
@@ -23,6 +29,8 @@ class Kilonova():
             return self._cal_lightcurve(param_list,times,band,dL)
         elif self.model_type == 1:
             return self._cal_lightcurve_afterglowpy(param_list,times,band,dL,z)
+        elif self.model_type == 2:
+            return self._cal_lightcurve_2comp(param_list,times,band,dL)
 #############################################
     
     def load_model(self):
@@ -42,7 +50,11 @@ class Kilonova():
                 import afterglowpy
             except:
                 raise ImportError('afterglowpy is not installed')
-            
+        elif self.model_type == 2:
+            modelfile = f"{self.model_name.split('-')[0]}.pkl"
+            with open(self.model_dir + modelfile,'rb') as handle:
+                self.model = pickle.load(handle)
+
     def _cal_lightcurve(self,param_list,times,band,dL):
         if band[-3:] == 'GHz' or band[-3:] == 'keV':
             lightcurve = np.zeros(times.shape)
@@ -101,3 +113,11 @@ class Kilonova():
         nu.fill(utils.get_effective_lambda(band,wave_eff=False))
         Fnu = grb.fluxDensity(times*86400,nu,**Z)*1e-3 #Jy
         return utils.fluxdensity2mag(Fnu)
+    def _cal_lightcurve_2comp(self,param_list,times,band,dL):
+        num_params = len(param_list)
+        params_1 = param_list[:num_params//2]
+        params_2 = param_list[num_params//2:]
+        mags_1 = self._cal_lightcurve(params_1,times,band,dL)
+        mags_2 = self._cal_lightcurve(params_2,times,band,dL)
+        lightcurve = utils.sumab([mags_1,mags_2])
+        return lightcurve
