@@ -8,7 +8,7 @@ import os
 import scipy
 import dynesty
 from dynesty.pool import Pool as dynesty_pool
-#import pymultinest
+import pymultinest
 
 def dynesty_fit(transient:Transient,models:List[Kilonova],priors:List[Prior] = None,dlogz = None,processes = 1):
     print('Start fitting!')
@@ -24,6 +24,9 @@ def dynesty_fit(transient:Transient,models:List[Kilonova],priors:List[Prior] = N
     bands = list(set(data['band']))
  
     def prior_transform(u_params):
+        '''
+        Transform the unit cube to the parameter space
+        '''
         u_params = np.array(u_params)
         for i,prior in enumerate(priors):
             if prior.prior_type == 'uniform':
@@ -77,46 +80,66 @@ def dynesty_fit(transient:Transient,models:List[Kilonova],priors:List[Prior] = N
 
     return results
 
-# def pymultinest_fit(transient:Transient,model:Kilonova,priors:List[Prior] = None):
-#     if priors == None:
-#         priors = model.priors
-#     ndim = len(priors)
-#     data = transient.data
-#     dL = transient.dL
-#     bands = list(set(data['band']))
-#     variance = 1
+def pymultinest_fit(transient:Transient,models:List[Kilonova],priors:List[Prior] = None):
+    print('Start fitting!')
+    model_num = len(models)
+    params_num = [len(model.priors) for model in models]
+    if priors == None:
+        priors = []
+        for model in models:
+            priors = priors + model.priors
+    n_dim = len(priors)
+    data = transient.data
+    dL = transient.dL
+    bands = list(set(data['band']))
 
-#     def prior(u_params,ndim,nparams):
-#         #u_params = np.array(u_params)
-#         for i,prior in enumerate(priors):
-#             if prior.prior_type == 'uniform':
-#                 u_params[i] = u_params[i]*(prior.max-prior.min) + prior.min
-#             elif prior.prior_type == 'gaussian':
-#                 u_params[i] = scipy.stats.truncnorm.ppf(u_params[i],(prior.min-prior.mu)/prior.sigma,(prior.max-prior.mu)/prior.sigma,loc = prior.mu,scale = prior.sigma)
-#         return u_params
+    def prior_transform(u_params,ndim,nparams):
+        '''
+        Transform the unit cube to the parameter space
+        The last two parameters are ndim and nparams, which are required by pymultinest
+        '''
+        for i,prior in enumerate(priors):
+            if prior.prior_type == 'uniform':
+                u_params[i] = u_params[i]*(prior.max-prior.min) + prior.min
+            elif prior.prior_type == 'gaussian':
+                u_params[i] = scipy.stats.truncnorm.ppf(u_params[i],(prior.min-prior.mu)/prior.sigma,(prior.max-prior.mu)/prior.sigma,loc = prior.mu,scale = prior.sigma)
+        return u_params
 
-#     def loglike(cube,ndim,nparams):
-#         log_band = []
-#         params = []
-#         for i in range(ndim):
-#             params.append(cube[i])
-#         params = np.array(params)
-#         variance = 1
-#         for band in bands:
-#             phase = data[(data['band']==band)]['phase']
-#             mags = model.cal_lightcurve(param_list=params,times=phase,band=band,dL=dL)
-#             log_i = -0.5*np.sum((data[data['band']==band]['mag']-mags)**2/(variance**2+data[data['band']==band]['mag_err']**2))
-#             if np.isin(99,data[data['band']==band]['mag_err']):
-#                 upl_phase = data[(data['band']==band) & (data['mag_err']==99)]['phase']
-#                 upl_mags = data[(data['band']==band) & (data['mag_err']==99)]['mag']
-#                 mags = model.cal_lightcurve(param_list=params,times=upl_phase,band=band,dL=dL)
-#                 sub = mags - upl_mags
-#                 if np.min(sub) < 0:
-#                     log_i = -np.inf
-#             log_band.append(log_i)
-#         return np.sum(log_band)
+    def dlog_like(cube,ndim,nparams):
+        log_band = []
+        params = []
+        for i in range(ndim):
+            params.append(cube[i])
+        variance = 1
+        for band in bands:
+            phase = data[(data['band']==band)]['phase']
+
+            mags = []
+            total = 0
+            for i in range(model_num):
+                model = models[i]
+                mags.append(model.cal_lightcurve(param_list=params[total:total+params_num[i]],times=phase,band=band,dL=dL))
+                total += params_num[i]
+            mags = utils.sumab(mags)
+
+            log_i = -0.5*np.sum((data[data['band']==band]['mag']-mags)**2/(variance**2+data[data['band']==band]['mag_err']**2))
+            if np.isin(99,data[data['band']==band]['mag_err']):
+                upl_phase = data[(data['band']==band) & (data['mag_err']==99)]['phase']
+                upl_mags = data[(data['band']==band) & (data['mag_err']==99)]['mag']
+                mags = []
+                total = 0
+                for i in range(model_num):
+                    model = models[i]
+                    mags.append(model.cal_lightcurve(param_list=params[total:total+params_num[i]],times=upl_phase,band=band,dL=dL))
+                    total += params_num[i] 
+                mags = utils.sumab(mags)               
+                sub = mags - upl_mags
+                if np.min(sub) < 0:
+                    log_i = -np.inf
+            log_band.append(log_i)
+        return np.sum(log_band)
     
-#     pymultinest.run(loglike, prior, ndim, outputfiles_basename=os.path.join(os.path.dirname(__file__),'out/'),resume = False, verbose = True)
+    pymultinest.run(dlog_like, prior_transform, n_dim, n_live_points= 1000, evidence_tolerance= 0.1,outputfiles_basename=os.path.join(os.path.dirname(__file__),'out/'),resume = False, verbose = True)
 
-#     a = pymultinest.Analyzer(outputfiles_basename=os.path.join(os.path.dirname(__file__),'out/'),n_params=ndim)
-#     return a.get_equal_weighted_posterior()[:,:-1]
+    a = pymultinest.Analyzer(outputfiles_basename=os.path.join(os.path.dirname(__file__),'out/'),n_params=n_dim)
+    return a.get_equal_weighted_posterior()[:,:-1]
