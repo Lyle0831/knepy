@@ -139,7 +139,11 @@ def pymultinest_fit(transient:Transient,models:List[Kilonova],priors:List[Prior]
             log_band.append(log_i)
         return np.sum(log_band)
     
-    pymultinest.run(dlog_like, prior_transform, n_dim, n_live_points= 1000, evidence_tolerance= 0.1,outputfiles_basename=os.path.join(os.path.dirname(__file__),'out/'),resume = False, verbose = True)
+    base_dir = os.path.join(os.path.dirname(__file__),'out/')
+    if not os.path.exists(base_dir):
+        os.makedirs(base_dir)
 
-    a = pymultinest.Analyzer(outputfiles_basename=os.path.join(os.path.dirname(__file__),'out/'),n_params=n_dim)
+    pymultinest.run(dlog_like, prior_transform, n_dim, n_live_points= 1000, evidence_tolerance= 0.1,outputfiles_basename=base_dir,resume = False, verbose = True)
+
+    a = pymultinest.Analyzer(outputfiles_basename=base_dir,n_params=n_dim)
     return a.get_equal_weighted_posterior()[:,:-1]
